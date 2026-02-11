@@ -17,7 +17,7 @@ if not API_TOKEN:
 else:
     print("Bot tokeni muvaffaqiyatli qabul qilindi!")
 
-ADMIN_ID = 123456789  # <-- O'Z ID RAQAMINGIZNI YOZING
+ADMIN_ID = 1406969675  # <-- O'Z ID RAQAMINGIZNI YOZING
 
 # --- BOTNI ISHGA TUSHIRISH ---
 logging.basicConfig(level=logging.INFO)
