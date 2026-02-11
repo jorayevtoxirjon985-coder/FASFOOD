@@ -1,6 +1,7 @@
 import logging
 import os
-import random  # <-- Tasodifiy kod yaratish uchun kerak
+import random
+import uuid  # Har bir buyurtmaga unikal ID berish uchun
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
@@ -10,25 +11,25 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # --- SOZLAMALAR ---
 API_TOKEN = os.getenv("BOT_TOKEN")
 
+# Token tekshiruvi
 if not API_TOKEN:
-    print("DIQQAT! BOT_TOKEN topilmadi. Railway Variables bo'limiga kiring.")
+    print("DIQQAT! Token topilmadi. Railway Variablesga kiritilganiga ishonch hosil qiling.")
 else:
-    print("Bot tokeni qabul qilindi!")
+    print("Bot ishga tushdi!")
 
 ADMIN_ID = 123456789  # <-- O'Z ID RAQAMINGIZNI YOZING
 
 # --- BOTNI ISHGA TUSHIRISH ---
 logging.basicConfig(level=logging.INFO)
+bot = Bot(token=API_TOKEN if API_TOKEN else "123:test") # Xatolik bermasligi uchun vaqtincha
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
-if API_TOKEN:
-    bot = Bot(token=API_TOKEN)
-    storage = MemoryStorage()
-    dp = Dispatcher(bot, storage=storage)
-else:
-    exit()
-
-# --- XOTIRA ---
+# --- XOTIRA (DATABASE O'RNIGA) ---
+# Menyular
 menu = {}
+# Aktiv buyurtmalar: { 'order_id': {'user_id': 123, 'food': 'Lavash', 'code': 5544} }
+orders = {}
 
 # --- HOLATLAR ---
 class AdminState(StatesGroup):
@@ -36,32 +37,32 @@ class AdminState(StatesGroup):
     price = State()
     delete = State()
 
-# --- ADMIN PANEL QISMI ---
+# ================= ADMIN PANEL =================
 
 @dp.message_handler(commands=['admin'], user_id=ADMIN_ID)
 async def admin_start(message: types.Message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("➕ Ovqat qo'shish", "➖ Ovqat o'chirish")
     markup.add("📋 Menyuni ko'rish")
-    await message.answer("Admin panelga xush kelibsiz!", reply_markup=markup)
+    await message.answer("Admin panel boshqaruvi:", reply_markup=markup)
 
 # 1. Ovqat qo'shish
 @dp.message_handler(text="➕ Ovqat qo'shish", user_id=ADMIN_ID)
 async def add_food_start(message: types.Message):
     await AdminState.name.set()
-    await message.answer("Ovqat nomini kiriting (masalan: Lavash):")
+    await message.answer("Ovqat nomini yozing:")
 
 @dp.message_handler(state=AdminState.name)
 async def add_food_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['name'] = message.text
     await AdminState.price.set()
-    await message.answer("Narxini kiriting (faqat raqam, masalan: 25000):")
+    await message.answer("Narxini yozing (faqat raqam):")
 
 @dp.message_handler(state=AdminState.price)
 async def add_food_price(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("Iltimos, faqat raqam kiriting!")
+        await message.answer("Raqam yozing!")
         return
     
     async with state.proxy() as data:
@@ -70,135 +71,170 @@ async def add_food_price(message: types.Message, state: FSMContext):
         menu[name] = price
     
     await state.finish()
-    await message.answer(f"✅ {name} menyuga {price} so'm narx bilan qo'shildi.")
+    await message.answer(f"✅ {name} qo'shildi.")
 
 # 2. Ovqat o'chirish
 @dp.message_handler(text="➖ Ovqat o'chirish", user_id=ADMIN_ID)
 async def delete_food_start(message: types.Message):
     if not menu:
-        await message.answer("Menyu bo'm-bo'sh.")
+        await message.answer("Menyu bo'sh.")
         return
-    
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for food in menu:
         markup.add(food)
     markup.add("🔙 Bekor qilish")
-    
     await AdminState.delete.set()
-    await message.answer("O'chirmoqchi bo'lgan ovqatni tanlang:", reply_markup=markup)
+    await message.answer("Tanlang:", reply_markup=markup)
 
 @dp.message_handler(state=AdminState.delete)
 async def delete_food_finish(message: types.Message, state: FSMContext):
     food = message.text
     if food in menu:
         del menu[food]
-        await message.answer(f"🗑 {food} menyudan o'chirildi.", reply_markup=types.ReplyKeyboardRemove())
-    elif food == "🔙 Bekor qilish":
-        await message.answer("Bekor qilindi.", reply_markup=types.ReplyKeyboardRemove())
-    else:
-        await message.answer("Bunday ovqat topilmadi.")
+        await message.answer("O'chirildi.", reply_markup=types.ReplyKeyboardRemove())
     await state.finish()
 
-# 3. Menyuni ko'rish
+# 3. Menyu ko'rish
 @dp.message_handler(text="📋 Menyuni ko'rish", user_id=ADMIN_ID)
 async def show_menu(message: types.Message):
     if not menu:
         await message.answer("Menyu bo'sh.")
-    else:
-        msg = "📋 JO'RIY MENYU:\n\n"
-        for k, v in menu.items():
-            msg += f"🔹 {k} - {v} so'm\n"
-        await message.answer(msg)
+        return
+    msg = "📋 MENYU:\n\n"
+    for k, v in menu.items():
+        msg += f"🔹 {k} - {v} so'm\n"
+    await message.answer(msg)
 
-# --- FOYDALANUVCHI QISMI ---
+
+# ================= FOYDALANUVCHI QISMI =================
 
 @dp.message_handler(commands=['start'])
 async def user_start(message: types.Message):
     if not menu:
-        await message.answer("Hozircha menyu bo'sh. Iltimos keyinroq kiring.")
+        await message.answer("Oshxona menyusi hozircha bo'sh.")
         return
 
     markup = InlineKeyboardMarkup(row_width=1)
     for food, price in menu.items():
-        # Callback format: buy:ovqat_nomi
+        # Callback faqat ovqat nomini oladi
         btn = InlineKeyboardButton(text=f"{food} - {price} so'm", callback_data=f"buy:{food}")
         markup.add(btn)
     
-    await message.answer("Assalomu alaykum! Buyurtma berish uchun taomni tanlang:", reply_markup=markup)
+    await message.answer("Quyidagi taomlardan birini tanlang:", reply_markup=markup)
 
-# Buyurtmani qabul qilish va KOD yaratish
+# --- BUYURTMA QILISH ---
 @dp.callback_query_handler(lambda c: c.data.startswith('buy:'))
-async def process_order(callback_query: types.CallbackQuery):
-    food_name = callback_query.data.split(":")[1]
-    user_id = callback_query.from_user.id
-    username = callback_query.from_user.username
-    full_name = callback_query.from_user.full_name
+async def user_buy(call: types.CallbackQuery):
+    food_name = call.data.split(":")[1]
+    user_id = call.from_user.id
+    full_name = call.from_user.full_name
+    username = call.from_user.username
 
-    # Tasodifiy 4 xonali kod yaratamiz (Masalan: 4812)
-    order_code = random.randint(1000, 9999)
-    
-    await bot.answer_callback_query(callback_query.id, text="Buyurtma qabul qilindi!")
-    await bot.send_message(user_id, f"✅ {food_name} buyurtmangiz adminga yuborildi.\n\nTayyor bo'lganda sizga maxsus kod yuboramiz.")
+    # 1. Unikal ID va Maxfiy kod yaratamiz
+    order_id = str(uuid.uuid4())[:8] # 8 xonali ID (texnik ID)
+    secret_code = random.randint(1000, 9999) # 4 xonali mijoz kodi (oddiysi)
 
-    # Adminga xabar yuborish (Kod bilan)
-    admin_markup = InlineKeyboardMarkup()
-    # Callback format: ready:user_id:food_name:code
-    btn_ready = InlineKeyboardButton("🟡 Tayyor (Mijozni chaqirish)", callback_data=f"ready:{user_id}:{food_name}:{order_code}")
-    btn_cancel = InlineKeyboardButton("❌ Bekor qilish", callback_data=f"cancel:{user_id}")
-    admin_markup.add(btn_ready, btn_cancel)
-    
-    msg = (f"❗️ YANGI BUYURTMA!\n\n"
-           f"👤 Mijoz: {full_name} (@{username})\n"
-           f"🍽 Taom: {food_name}\n"
-           f"🔐 MAXFIY KOD: {order_code}")  # Admin kodni oldindan ko'rib turadi
-    
-    await bot.send_message(ADMIN_ID, msg, reply_markup=admin_markup)
+    # 2. Xotiraga saqlaymiz
+    orders[order_id] = {
+        'user_id': user_id,
+        'food': food_name,
+        'code': secret_code,
+        'name': full_name,
+        'username': username
+    }
 
-# --- OSHXONACHI (ADMIN) UCHUN STATUSLAR ---
+    # 3. Mijozga xabar
+    await call.answer("Buyurtma qabul qilindi!")
+    await bot.send_message(user_id, f"✅ **{food_name}** buyurtma qilindi.\n\n⏳ Iltimos kuting, taom tayyor bo'lganda sizga MAXFIY KOD yuboriladi.")
 
-# 1. Tayyor bo'lganda mijozga kodni yuborish
+    # 4. Adminga xabar (Boshqaruv tugmalari bilan)
+    markup = InlineKeyboardMarkup()
+    # Callbackda faqat ID yuboramiz (xatolik bo'lmasligi uchun)
+    btn_ready = InlineKeyboardButton("🟡 Tayyor (Mijozga kod yuborish)", callback_data=f"ready:{order_id}")
+    btn_cancel = InlineKeyboardButton("❌ Bekor qilish", callback_data=f"cancel:{order_id}")
+    markup.add(btn_ready)
+    markup.add(btn_cancel)
+
+    admin_msg = (
+        f"❗️ YANGI BUYURTMA!\n\n"
+        f"🆔 Zakaz ID: `{order_id}`\n"
+        f"👤 Mijoz: {full_name} (@{username})\n"
+        f"🍔 Taom: **{food_name}**\n\n"
+        f"Tayyor bo'lganda tugmani bosing 👇"
+    )
+    await bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup, parse_mode="Markdown")
+
+
+# ================= STATUSLARNI O'ZGARTIRISH =================
+
+# 1. TAYYOR TUGMASI BOSILGANDA
 @dp.callback_query_handler(lambda c: c.data.startswith('ready:'))
-async def notify_user_ready(callback_query: types.CallbackQuery):
-    data = callback_query.data.split(":")
-    user_id = data[1]
-    food_name = data[2]
-    order_code = data[3]
-    
+async def order_ready(call: types.CallbackQuery):
+    order_id = call.data.split(":")[1]
+
+    # Agar buyurtma xotirada bo'lmasa (server o'chib yongan bo'lsa)
+    if order_id not in orders:
+        await call.answer("Bu buyurtma topilmadi (eskirgan).", show_alert=True)
+        return
+
+    order = orders[order_id]
+    user_id = order['user_id']
+    secret_code = order['code']
+    food_name = order['food']
+
+    # --- MIJOZGA KODNI YUBORAMIZ ---
     try:
-        # Mijozga kodni yuborish
         await bot.send_message(
-            int(user_id), 
-            f"📢 DIQQAT! Buyurtmangiz tayyor!\n\n"
-            f"🍔 Taom: **{food_name}**\n"
-            f"🔢 OLIB KETISH KODI: **{order_code}**\n\n"
-            f"Kassaga borib shu kodni ayting va taomingizni oling."
+            user_id,
+            f"😋 TAOM TAYYOR!\n\n"
+            f"🍔 Buyurtma: **{food_name}**\n"
+            f"🔢 SIZNING KODINGIZ: **{secret_code}**\n\n"
+            f"❗️ Kassaga borib ushbu kodni ayting va taomingizni oling."
         )
-        await bot.answer_callback_query(callback_query.id, text="Mijozga kod yuborildi ✅")
-        
-        # Admin xabarini o'zgartirish
-        finish_markup = InlineKeyboardMarkup()
-        btn_finish = InlineKeyboardButton("✅ Berib yuborildi (Yopish)", callback_data="finish_order")
-        finish_markup.add(btn_finish)
+    except:
+        await call.answer("Mijozga xabar bormadi (bloklagan).")
 
-        await callback_query.message.edit_text(
-            callback_query.message.text + "\n\n✅ TAYYOR! MIJOZGA XABAR BORDI.\nMijoz kelib kodni aytsa, tekshirib 'Berib yuborildi' ni bosing.",
-            reply_markup=finish_markup
-        )
-    except Exception:
-        await bot.answer_callback_query(callback_query.id, text="Mijozga yuborib bo'lmadi (bloklagan).")
+    # --- ADMIN XABARINI O'ZGARTIRAMIZ ---
+    markup = InlineKeyboardMarkup()
+    btn_done = InlineKeyboardButton("✅ Berib yubordim (Yakunlash)", callback_data=f"done:{order_id}")
+    markup.add(btn_done)
 
-# 2. Buyurtmani yopish (Berib yuborgandan keyin)
-@dp.callback_query_handler(text="finish_order")
-async def finish_order_handler(callback_query: types.CallbackQuery):
-    await callback_query.message.delete()
-    await bot.answer_callback_query(callback_query.id, text="Buyurtma yopildi.")
+    new_text = (
+        f"✅ MIJOZGA XABAR YUBORILDI!\n\n"
+        f"👤 Mijoz: {order['name']}\n"
+        f"🍔 Taom: {food_name}\n"
+        f"🔑 **TEKSHIRISH KODI:** `{secret_code}`\n\n"
+        f"Mijozdan kodni so'rang. Agar **{secret_code}** desa, taomni berib, pastdagi tugmani bosing."
+    )
+    await call.message.edit_text(new_text, reply_markup=markup, parse_mode="Markdown")
 
-# 3. Bekor qilish
+
+# 2. BERIB YUBORDIM (YAKUNLASH) TUGMASI
+@dp.callback_query_handler(lambda c: c.data.startswith('done:'))
+async def order_done(call: types.CallbackQuery):
+    order_id = call.data.split(":")[1]
+
+    if order_id in orders:
+        del orders[order_id] # Xotiradan o'chiramiz
+
+    await call.message.edit_text("✅ BUYURTMA YAKUNLANDI (Berib yuborildi).")
+    await call.answer("Bajarildi!")
+
+
+# 3. BEKOR QILISH TUGMASI
 @dp.callback_query_handler(lambda c: c.data.startswith('cancel:'))
-async def cancel_order(callback_query: types.CallbackQuery):
-    user_id = callback_query.data.split(":")[1]
-    await bot.send_message(int(user_id), "❌ Uzr, buyurtmangiz bekor qilindi.")
-    await callback_query.message.edit_text("❌ BUYURTMA BEKOR QILINDI.")
+async def order_cancel(call: types.CallbackQuery):
+    order_id = call.data.split(":")[1]
+
+    if order_id in orders:
+        user_id = orders[order_id]['user_id']
+        try:
+            await bot.send_message(user_id, "❌ Uzr, buyurtmangiz bekor qilindi.")
+        except:
+            pass
+        del orders[order_id]
+
+    await call.message.edit_text("❌ BUYURTMA BEKOR QILINDI.")
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
