@@ -1,36 +1,34 @@
 import logging
 import os
-import random
-import uuid
+import random  # <-- Tasodifiy kod yaratish uchun kerak
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- SOZLAMALAR ---
 API_TOKEN = os.getenv("BOT_TOKEN")
 
-# --- ADMIN ID NI O'ZGARTIRISH KERAK ---
-# Hozircha shu raqam tursin, pastda botning o'zi sizga IDingizni aytadi
-ADMIN_ID = 1406969675 
+if not API_TOKEN:
+    print("DIQQAT! BOT_TOKEN topilmadi. Railway Variables bo'limiga kiring.")
+else:
+    print("Bot tokeni qabul qilindi!")
+
+ADMIN_ID = 123456789  # <-- O'Z ID RAQAMINGIZNI YOZING
 
 # --- BOTNI ISHGA TUSHIRISH ---
 logging.basicConfig(level=logging.INFO)
 
-# Token tekshiruvi (xatolik bo'lsa ham bot o'chmaydi, log yozadi)
-if not API_TOKEN:
-    print("DIQQAT! BOT_TOKEN topilmadi!")
-    bot = Bot(token="123456:FAKE_TOKEN") # Fake token to prevent crash import
-else:
+if API_TOKEN:
     bot = Bot(token=API_TOKEN)
+    storage = MemoryStorage()
+    dp = Dispatcher(bot, storage=storage)
+else:
+    exit()
 
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
-
-# --- MA'LUMOTLAR BAZASI (RAM) ---
-menu = {}  # { "Lavash": 25000 }
-orders = {} # { "order_id": {...} }
+# --- XOTIRA ---
+menu = {}
 
 # --- HOLATLAR ---
 class AdminState(StatesGroup):
@@ -38,67 +36,32 @@ class AdminState(StatesGroup):
     price = State()
     delete = State()
 
-# ================= TUGMALAR =================
-def main_menu_btn(user_id):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    # Agar foydalanuvchi ADMIN bo'lsa, unga admin tugmalari chiqadi
-    if user_id == ADMIN_ID:
-        markup.add("➕ Ovqat qo'shish", "➖ Ovqat o'chirish")
-        markup.add("📋 Menyuni ko'rish")
-    else:
-        # Oddiy odamga faqat buyurtma tugmasi (Aslida menyu startda chiqadi)
-        markup.add("📞 Biz bilan aloqa")
-    return markup
+# --- ADMIN PANEL QISMI ---
 
-# ================= START BUYRUG'I =================
-@dp.message_handler(commands=['start'])
-async def send_welcome(message: types.Message):
-    user_id = message.from_user.id
-    
-    # DIQQAT: Bu yerda IDingizni ko'rsatadi
-    text = f"Assalomu alaykum! Xush kelibsiz.\n\n🆔 Sizning ID raqamingiz: `{user_id}`"
-    
-    if user_id != ADMIN_ID:
-        text += "\n\n⚠️ Siz hozir **ADMIN EMASSIZ**.\nAdmin bo'lish uchun `main.py` faylidagi `ADMIN_ID` ni shu raqamga o'zgartiring!"
-    else:
-        text += "\n\n✅ Siz **ADMIN** sifatida tanildingiz."
+@dp.message_handler(commands=['admin'], user_id=ADMIN_ID)
+async def admin_start(message: types.Message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("➕ Ovqat qo'shish", "➖ Ovqat o'chirish")
+    markup.add("📋 Menyuni ko'rish")
+    await message.answer("Admin panelga xush kelibsiz!", reply_markup=markup)
 
-    # Menyuni chiqarish
-    markup = InlineKeyboardMarkup(row_width=1)
-    if not menu:
-        text += "\n\nMenyu hozircha bo'sh."
-    else:
-        text += "\n\n👇 Buyurtma berish uchun tanlang:"
-        for food, price in menu.items():
-            markup.add(InlineKeyboardButton(f"{food} - {price} so'm", callback_data=f"buy:{food}"))
-
-    await message.answer(text, reply_markup=main_menu_btn(user_id))
-    if markup.inline_keyboard:
-        await message.answer("Taomlar:", reply_markup=markup)
-
-
-# ================= ADMIN: OVQAT QO'SHISH =================
-@dp.message_handler(text="➕ Ovqat qo'shish")
+# 1. Ovqat qo'shish
+@dp.message_handler(text="➕ Ovqat qo'shish", user_id=ADMIN_ID)
 async def add_food_start(message: types.Message):
-    # Admin tekshiruvi
-    if message.from_user.id != ADMIN_ID:
-        await message.answer(f"Siz admin emassiz! Sizning ID: {message.from_user.id}")
-        return
-
     await AdminState.name.set()
-    await message.answer("Yangi ovqat nomini yozing (masalan: Burger):", reply_markup=types.ReplyKeyboardRemove())
+    await message.answer("Ovqat nomini kiriting (masalan: Lavash):")
 
 @dp.message_handler(state=AdminState.name)
 async def add_food_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['name'] = message.text
     await AdminState.price.set()
-    await message.answer("Narxini yozing (faqat raqam, masalan: 15000):")
+    await message.answer("Narxini kiriting (faqat raqam, masalan: 25000):")
 
 @dp.message_handler(state=AdminState.price)
 async def add_food_price(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("Iltimos, faqat raqam yozing!")
+        await message.answer("Iltimos, faqat raqam kiriting!")
         return
     
     async with state.proxy() as data:
@@ -107,122 +70,135 @@ async def add_food_price(message: types.Message, state: FSMContext):
         menu[name] = price
     
     await state.finish()
-    await message.answer(f"✅ **{name}** menyuga qo'shildi!", reply_markup=main_menu_btn(message.from_user.id))
+    await message.answer(f"✅ {name} menyuga {price} so'm narx bilan qo'shildi.")
 
-
-# ================= ADMIN: MENYU KO'RISH =================
-@dp.message_handler(text="📋 Menyuni ko'rish")
-async def show_menu_handler(message: types.Message):
-    if not menu:
-        await message.answer("Menyu bo'sh.")
-        return
-    
-    msg = "📜 **MENYU:**\n"
-    for k, v in menu.items():
-        msg += f"▫️ {k} — {v} so'm\n"
-    await message.answer(msg)
-
-
-# ================= ADMIN: OVQAT O'CHIRISH =================
-@dp.message_handler(text="➖ Ovqat o'chirish")
+# 2. Ovqat o'chirish
+@dp.message_handler(text="➖ Ovqat o'chirish", user_id=ADMIN_ID)
 async def delete_food_start(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
+    if not menu:
+        await message.answer("Menyu bo'm-bo'sh.")
         return
     
-    if not menu:
-        await message.answer("O'chiradigan hech narsa yo'q.")
-        return
-
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for food in menu:
         markup.add(food)
-    markup.add("Bekor qilish")
+    markup.add("🔙 Bekor qilish")
     
     await AdminState.delete.set()
-    await message.answer("Qaysi ovqatni o'chiramiz?", reply_markup=markup)
+    await message.answer("O'chirmoqchi bo'lgan ovqatni tanlang:", reply_markup=markup)
 
 @dp.message_handler(state=AdminState.delete)
 async def delete_food_finish(message: types.Message, state: FSMContext):
     food = message.text
     if food in menu:
         del menu[food]
-        await message.answer(f"🗑 {food} o'chirildi.", reply_markup=main_menu_btn(message.from_user.id))
+        await message.answer(f"🗑 {food} menyudan o'chirildi.", reply_markup=types.ReplyKeyboardRemove())
+    elif food == "🔙 Bekor qilish":
+        await message.answer("Bekor qilindi.", reply_markup=types.ReplyKeyboardRemove())
     else:
-        await message.answer("Bekor qilindi.", reply_markup=main_menu_btn(message.from_user.id))
-    
+        await message.answer("Bunday ovqat topilmadi.")
     await state.finish()
 
+# 3. Menyuni ko'rish
+@dp.message_handler(text="📋 Menyuni ko'rish", user_id=ADMIN_ID)
+async def show_menu(message: types.Message):
+    if not menu:
+        await message.answer("Menyu bo'sh.")
+    else:
+        msg = "📋 JO'RIY MENYU:\n\n"
+        for k, v in menu.items():
+            msg += f"🔹 {k} - {v} so'm\n"
+        await message.answer(msg)
 
-# ================= MIJOZ: BUYURTMA BERISH =================
-@dp.callback_query_handler(lambda c: c.data.startswith('buy:'))
-async def buy_process(call: types.CallbackQuery):
-    food = call.data.split(":")[1]
-    user_id = call.from_user.id
-    name = call.from_user.full_name
-    
-    # ID va Kod generatsiya
-    order_id = str(uuid.uuid4())[:8]
-    secret_code = random.randint(1000, 9999)
-    
-    orders[order_id] = {
-        'user_id': user_id,
-        'food': food,
-        'code': secret_code,
-        'name': name
-    }
-    
-    # Mijozga javob
-    await call.answer("Buyurtma qabul qilindi ✅")
-    await bot.send_message(user_id, f"✅ **{food}** buyurtma qilindi.\nTayyor bo'lganda KOD keladi...")
-    
-    # Adminga xabar
-    admin_markup = InlineKeyboardMarkup()
-    admin_markup.add(InlineKeyboardButton("🟡 Tayyor (Kod yuborish)", callback_data=f"ready:{order_id}"))
-    admin_markup.add(InlineKeyboardButton("❌ Bekor qilish", callback_data=f"cancel:{order_id}"))
-    
-    await bot.send_message(ADMIN_ID, f"🆕 **YANGI BUYURTMA!**\n\n👤 {name}\n🍔 {food}\n🆔 ID: `{order_id}`", reply_markup=admin_markup)
+# --- FOYDALANUVCHI QISMI ---
 
-
-# ================= STATUSLAR =================
-@dp.callback_query_handler(lambda c: c.data.startswith('ready:'))
-async def ready_process(call: types.CallbackQuery):
-    order_id = call.data.split(":")[1]
-    if order_id not in orders:
-        await call.answer("Eski buyurtma (topilmadi).", show_alert=True)
+@dp.message_handler(commands=['start'])
+async def user_start(message: types.Message):
+    if not menu:
+        await message.answer("Hozircha menyu bo'sh. Iltimos keyinroq kiring.")
         return
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for food, price in menu.items():
+        # Callback format: buy:ovqat_nomi
+        btn = InlineKeyboardButton(text=f"{food} - {price} so'm", callback_data=f"buy:{food}")
+        markup.add(btn)
     
-    data = orders[order_id]
+    await message.answer("Assalomu alaykum! Buyurtma berish uchun taomni tanlang:", reply_markup=markup)
+
+# Buyurtmani qabul qilish va KOD yaratish
+@dp.callback_query_handler(lambda c: c.data.startswith('buy:'))
+async def process_order(callback_query: types.CallbackQuery):
+    food_name = callback_query.data.split(":")[1]
+    user_id = callback_query.from_user.id
+    username = callback_query.from_user.username
+    full_name = callback_query.from_user.full_name
+
+    # Tasodifiy 4 xonali kod yaratamiz (Masalan: 4812)
+    order_code = random.randint(1000, 9999)
     
-    # Mijozga kod yuborish
+    await bot.answer_callback_query(callback_query.id, text="Buyurtma qabul qilindi!")
+    await bot.send_message(user_id, f"✅ {food_name} buyurtmangiz adminga yuborildi.\n\nTayyor bo'lganda sizga maxsus kod yuboramiz.")
+
+    # Adminga xabar yuborish (Kod bilan)
+    admin_markup = InlineKeyboardMarkup()
+    # Callback format: ready:user_id:food_name:code
+    btn_ready = InlineKeyboardButton("🟡 Tayyor (Mijozni chaqirish)", callback_data=f"ready:{user_id}:{food_name}:{order_code}")
+    btn_cancel = InlineKeyboardButton("❌ Bekor qilish", callback_data=f"cancel:{user_id}")
+    admin_markup.add(btn_ready, btn_cancel)
+    
+    msg = (f"❗️ YANGI BUYURTMA!\n\n"
+           f"👤 Mijoz: {full_name} (@{username})\n"
+           f"🍽 Taom: {food_name}\n"
+           f"🔐 MAXFIY KOD: {order_code}")  # Admin kodni oldindan ko'rib turadi
+    
+    await bot.send_message(ADMIN_ID, msg, reply_markup=admin_markup)
+
+# --- OSHXONACHI (ADMIN) UCHUN STATUSLAR ---
+
+# 1. Tayyor bo'lganda mijozga kodni yuborish
+@dp.callback_query_handler(lambda c: c.data.startswith('ready:'))
+async def notify_user_ready(callback_query: types.CallbackQuery):
+    data = callback_query.data.split(":")
+    user_id = data[1]
+    food_name = data[2]
+    order_code = data[3]
+    
     try:
-        await bot.send_message(data['user_id'], f"📢 **DIQQAT!**\n\n🍔 {data['food']} tayyor!\n🔢 KODINGIZ: **{data['code']}**\n\nBoring oling.")
-    except:
-        pass
-    
-    # Admin panelini yangilash
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("✅ Berib yubordim", callback_data=f"done:{order_id}"))
-    
-    await call.message.edit_text(f"✅ **MIJOZGA XABAR BORDI!**\n\nKOD: **{data['code']}**\nMijozdan shu kodni so'rang.", reply_markup=markup)
+        # Mijozga kodni yuborish
+        await bot.send_message(
+            int(user_id), 
+            f"📢 DIQQAT! Buyurtmangiz tayyor!\n\n"
+            f"🍔 Taom: **{food_name}**\n"
+            f"🔢 OLIB KETISH KODI: **{order_code}**\n\n"
+            f"Kassaga borib shu kodni ayting va taomingizni oling."
+        )
+        await bot.answer_callback_query(callback_query.id, text="Mijozga kod yuborildi ✅")
+        
+        # Admin xabarini o'zgartirish
+        finish_markup = InlineKeyboardMarkup()
+        btn_finish = InlineKeyboardButton("✅ Berib yuborildi (Yopish)", callback_data="finish_order")
+        finish_markup.add(btn_finish)
 
-@dp.callback_query_handler(lambda c: c.data.startswith('done:'))
-async def done_process(call: types.CallbackQuery):
-    order_id = call.data.split(":")[1]
-    if order_id in orders:
-        del orders[order_id]
-    await call.message.edit_text("✅ Buyurtma yopildi.")
+        await callback_query.message.edit_text(
+            callback_query.message.text + "\n\n✅ TAYYOR! MIJOZGA XABAR BORDI.\nMijoz kelib kodni aytsa, tekshirib 'Berib yuborildi' ni bosing.",
+            reply_markup=finish_markup
+        )
+    except Exception:
+        await bot.answer_callback_query(callback_query.id, text="Mijozga yuborib bo'lmadi (bloklagan).")
 
+# 2. Buyurtmani yopish (Berib yuborgandan keyin)
+@dp.callback_query_handler(text="finish_order")
+async def finish_order_handler(callback_query: types.CallbackQuery):
+    await callback_query.message.delete()
+    await bot.answer_callback_query(callback_query.id, text="Buyurtma yopildi.")
+
+# 3. Bekor qilish
 @dp.callback_query_handler(lambda c: c.data.startswith('cancel:'))
-async def cancel_process(call: types.CallbackQuery):
-    order_id = call.data.split(":")[1]
-    if order_id in orders:
-        try:
-            await bot.send_message(orders[order_id]['user_id'], "❌ Buyurtmangiz bekor qilindi.")
-        except:
-            pass
-        del orders[order_id]
-    await call.message.edit_text("❌ Bekor qilindi.")
-
+async def cancel_order(callback_query: types.CallbackQuery):
+    user_id = callback_query.data.split(":")[1]
+    await bot.send_message(int(user_id), "❌ Uzr, buyurtmangiz bekor qilindi.")
+    await callback_query.message.edit_text("❌ BUYURTMA BEKOR QILINDI.")
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
